@@ -134,9 +134,7 @@ func (c *BikeCalc) Error() error {
 func (c *BikeCalc) appendErr(s string) {
 	c.errmsg = append(c.errmsg, s...)
 }
-func abs2(x float64) float64 {
-	return math.Float64frombits(math.Float64bits(x) &^ (1 << 63))
-}
+
 // this makes functions using it more inlineable.
 func abs(x float64) float64 {
 	if x > 0 {
@@ -367,12 +365,7 @@ func (c *BikeCalc) FlatSpeed(power float64) (vel float64, ok bool) {
 	return 
 }
 
-// Force balance equation: 
-//		sin*mg + cos*mg*Crr + cDrag*v^2 - power/v = 0
-// 		Set cos = sqrt(1-sin^2) and solve sin from:
-// 		sin*mg + sqrt(1-sin^2)*mg*Crr + cDrag*v^2 - power/v = 0
-
-// GradeFromVelAndPower returns slope tangent for speed, power and wind=0.
+// GradeFromVelAndPower returns slope tangent for speed, power and wind = 0.
 // Equation: sin*mg + sqrt(1-sin^2)*mg*Crr + cDrag*v^2 - power/v = 0
 func (c *BikeCalc) GradeFromVelAndPower(v, power float64) (tan float64) {
 	if v <= 0 {
@@ -409,7 +402,7 @@ func (c *BikeCalc) PowerFromVerticalUp(v, grade float64) (power float64) {
 	}
 	c.storeState()
 	defer c.restoreState()
-	c.SetGradeExact(grade)
+	c.SetGrade(grade)
 
 	v /= (c.sin * 3600) //speed on road m/s
 	return v * (c.fGR + c.cDrag*v*v)
@@ -417,16 +410,16 @@ func (c *BikeCalc) PowerFromVerticalUp(v, grade float64) (power float64) {
 
 // VerticalUpFromPower returns vertical speed up (m/h) for power. 
 // Speed is calculated by riding uphill slope with tangent grade.
-func (c *BikeCalc) VerticalUpFromPower(power, grade float64) (velup float64, ok bool) {
+func (c *BikeCalc) VerticalUpFromPower(power, grade float64) (float64, bool) {
 	if power <= 0 || grade < 0.01 {
 		return 0, false
 	}
 	c.storeState()
 	defer c.restoreState()
-	c.SetGradeExact(grade)
+	c.SetGrade(grade)
 	c.wind = 0
-	velup, iter := c.NewtonRaphson(power, minTolNR, 4)
-	return  velup * c.sin * 3600, iter > 0
+	v, iter := c.NewtonRaphson(power, minTolNR, 4)
+	return  v * c.sin * 3600, iter > 0
 }
 
 // CdAfromVelAndPower returns CdA from speed and power on flat road.
@@ -459,7 +452,6 @@ func (c *BikeCalc) VelFromTurnRadius(radius float64) (vel float64) {
 // LocalGravity calculates local gravitational acceleration for latitude and elevation.
 // Elevation correction for mean density rock underneath.
 // https://en.wikipedia.org/wiki/Gravity_of_Earth
-//
 func (c *BikeCalc) LocalGravity(degLat, metersEle float64) (gravity float64) {
 	const eleCorrection = (-3.086 + 1.1) * 1e-6
 	
@@ -491,7 +483,6 @@ func (c *BikeCalc) LocalGravity(degLat, metersEle float64) (gravity float64) {
 
 // RhoFromEle calculates air density and temperature for given elevation from
 // preset base elevation and base elevation's temperature and air density.
-// 
 func (c *BikeCalc) RhoFromEle(ele float64) (rho, temperature float64) {
 
 	const (
@@ -523,7 +514,7 @@ func (c *BikeCalc) RhoFromEle(ele float64) (rho, temperature float64) {
 	// "exact" rho
 	//rho *= math.Pow(1+x, y)
 	z := y * x*(1 - x*0.5)
-	rho *= 1 + z*(1 + z*(0.5 + z*0.1667))
+	rho *= 1 + z*(1 + z*(0.5 + z* (1.0 / 6.0)))
 	temperature = c.temperature + dEle*L
 	return 
 }
