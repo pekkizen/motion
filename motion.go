@@ -8,12 +8,12 @@ const (
 	minTolNR       	= 1e-12
 	maxSpeed       	= 1000.0
 	maxSpeedS		= "1000 m/s"
-	stdAirPressure  = 101325.0 //standard sea level atmospheric pressure (Pascals)
+	stdAirPressure 	= 101325.0 //standard sea level atmospheric pressure (Pascals)
 )
 const (
 	newtonRaphson       = 1
-	newtonHalley 		= 2
-	singleQuadratic     = 3
+	newtonHalley		= 2
+	singleQuadratic		= 3
 	doubleQuadratic     = 4
 	singleLinear		= 5
 	doubleLinear        = 6
@@ -34,7 +34,7 @@ type BikeCalc struct {
 	errmsg			[]byte
 	store         	store
 	
-	solverNo  		int
+	solverNo		int
 	gravity       	float64 
 	temperature   	float64
 	airPressure   	float64
@@ -75,7 +75,7 @@ type BikeCalc struct {
 	prevTan    		float64
 
 	roundsNR    	int
-	maxIter    		int
+	maxIter			int
 	callsFunc    	int
 	callsSolver  	int
 	callsFW      	int
@@ -89,8 +89,6 @@ type BikeCalc struct {
 	callsErr     	int
 	velErrors    	bool
 
-	s0				uint64 //xoroshiro128+ state 0
-	s1				uint64 //                    1
 }
 
 var solverFunc func (*BikeCalc, float64, float64, float64) (float64, int)
@@ -114,7 +112,6 @@ func Calculator() *BikeCalc {
 		velErrors:     	false,
 		minPower:      	1,
 	}
-	c.RandSeed(0xFeed14BadBabe5)
 	c.SetVelSolver(newtonRaphson)
 	return c
 }
@@ -153,45 +150,6 @@ func max(x, y float64) float64 {
 		return x
 	}
 	return y
-}
-
-// RandUint returns pseudorandom uinit64.
-// http://prng.di.unimi.it/xoroshiro128plus.c: 
-// "This is xoroshiro128+ 1.0, our best and fastest small-state generator
-// for floating-point numbers." 
-//
-func (c *BikeCalc) RandUint() uint64 {
-	s0 := c.s0
-	s1 := c.s1
-	r := s0 + s1
-	s1 ^= s0
-	c.s0 = ((s0 << 24) | (s0 >> 40)) ^ s1 ^ (s1 << 16)
-    c.s1 = (s1 << 37) | (s1 >> 27)
-	return r
-}
-// 	http://prng.di.unimi.it/:
-// 	Generating uniform doubles in the unit interval
-// 	A standard double (64-bit) floating-point number in IEEE floating point format has 52 bits
-//  of significand, plus an implicit bit at the left of the significand. Thus, the representation
-//  can actually store numbers with 53 significant binary digits.
-// 	Because of this fact, in C99 a 64-bit unsigned integer x should be converted to a 64-bit double using the expression
-// 		(x >> 11) * 0x1.0p-53
-
-// RandFloat returns uniformly distributed pseudorandom float64 in [0, 1).
-func (c *BikeCalc) RandFloat() float64 {
-
-	return float64(c.RandUint() >> 11) / (1<<53) 
-}
-// RandSeed --
-func (c *BikeCalc) RandSeed(seed uint64)  {
-	c.s0 = splitmix(seed)
-	c.s1 = splitmix(c.s0)
-}
-func splitmix(seed uint64) uint64 {
-	r := seed
-	r = (r ^ (r >> 30)) * 0xBF58476D1CE4E5B9
-	r = (r ^ (r >> 27)) * 0x94D049BB133111EB
-	return r ^ (r >> 31)
 }
 
 func (c *BikeCalc) storeState() {
