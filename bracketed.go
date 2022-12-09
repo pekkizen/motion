@@ -1,11 +1,19 @@
 package motion
+
 import "math"
 
 // This is the function we are solving: find v, so that function(v) = 0.
 func (c *BikeCalc) function(v float64) float64 {
 	c.callsFunc++
-	return v*(c.fGR + c.cDrag * abs(v+c.wind)*(v+c.wind)) - c.power
+	w := v + c.wind
+	fD := c.cDrag * w * w
+	if w < 0 {
+		fD = -fD
+	}
+	return v*(c.fGR+fD) - c.power
+	// return v*(c.fGR+c.cDrag*math.Abs(v+c.wind)*(v+c.wind)) - c.power
 }
+
 func (c *BikeCalc) bracketNotFound(s string) {
 	c.appendErr(": ")
 	c.appendErr(s)
@@ -18,7 +26,7 @@ func (c *BikeCalc) Bisect(power, tol, uplim float64) (float64, int) {
 		uplim = 2
 	}
 	if tol == 0 {
-		tol =  c.tolNR*c.tolNR*0.2
+		tol = c.tolNR * c.tolNR * 0.2
 	}
 	if tol < 0 {
 		tol = 0
@@ -28,7 +36,7 @@ func (c *BikeCalc) Bisect(power, tol, uplim float64) (float64, int) {
 	vL, vR := 0.0, uplim
 	for c.function(vR) < 0 {
 		if vR > maxSpeed {
-			c.appendErr(": Bisect stopped at speed > "+ maxSpeedS)
+			c.appendErr(": Bisect stopped at speed > " + maxSpeedS)
 			return vR, 0
 		}
 		vL = vR
@@ -37,10 +45,7 @@ func (c *BikeCalc) Bisect(power, tol, uplim float64) (float64, int) {
 	for vR-vL > tol {
 		v := (vL + vR) / 2
 		if v == vR || v == vL { //adjacent numbers, small tol
-			if abs(c.function(vL)) < abs(c.function(vR)) {
-				return vL, 1
-			}
-			return vR, 1
+			return vL, 1
 		}
 		if c.function(v) > 0 {
 			vR = v
@@ -55,36 +60,36 @@ func (c *BikeCalc) Bisect(power, tol, uplim float64) (float64, int) {
 	return (vL + vR) / 2, c.callsFunc - before
 }
 
-// Bracket return bracket v0 < v1, v1 - v0 <= len and f0 <= 0 && 0 <= f1.
-// Returning f0 > 0 || f1 < 0 --> bracket not found --> function is negative to very high speeds.
+// bracket return bracket vL < vR, vR - vL <= len and fR <= 0 && 0 <= fL.
+// Returning fR < 0 and message bracket not found --> function is negative to very high speeds.
 // c.power must be > 0, so that function(0) < 0. Otherwise zero or near zero root may be bracketed.
-func (c *BikeCalc) Bracket(len, vel float64) (v0, f0, v1, f1 float64) {
+func (c *BikeCalc) bracket(len, vel float64) (vL, fL, vR, fR float64) {
 
-	v0 = vel
-	if v0 < len {
-		v0 = len
+	vL = vel
+	if vL < len {
+		vL = len
 	}
-	f0 = c.function(v0)
-	for f0 > 0 {
-		v1, f1 =  v0, f0
-		if v0 -= len; v0 <= 0 {
-			return 0, -c.power, v1, f1
-		} 
-		if f0 = c.function(v0); f0 <= 0 {
+	fL = c.function(vL)
+	for fL > 0 {
+		vR, fR = vL, fL
+		if vL -= len; vL <= 0 {
+			return 0, -c.power, vR, fR
+		}
+		if fL = c.function(vL); fL <= 0 {
 			return
 		}
 	}
-	v1 = v0 + len
-	f1 = c.function(v1)
-	for f1 < 0 {
-		v0, f0 =  v1, f1
-		if v1 += len; v1 > maxSpeed {
+	vR = vL + len
+	fR = c.function(vR)
+	for fR < 0 {
+		vL, fL = vR, fR
+		if vR += len; vR > maxSpeed {
 			c.bracketNotFound("Bracket")
 			return
 		}
-		f1 = c.function(v1)
+		fR = c.function(vR)
 	}
-	return 
+	return
 }
 
 // BDQRF Bisected Direct Quadratic Regula Falsi
@@ -94,12 +99,11 @@ func (c *BikeCalc) Bracket(len, vel float64) (v0, f0, v1, f1 float64) {
 // Odyssey Space Research
 // 1120 NASA Parkway, Houston, Texas
 
-// quadratic interpolation of the root. 
+// quadratic interpolation of the root.
 // Parameter conditions: v0 < v2, f0 <= 0 && 0 <= f2 --> there is a root between v0 and v2.
-// If f0 <= 0 && 0 <= f2, the discriminant of the square root is always positive (in the article above).
-func (c *BikeCalc) quadratic(v0, f0, v2, f2 float64) float64 {
-	v1 := (v0 + v2) / 2 
-	f1 := c.function(v1)
+// Condition -> the discriminant of the square root is always >= 0 (in the paper above).
+func (c *BikeCalc) quadratic(v0, f0, v1, f1, v2, f2 float64) float64 {
+
 	d := f2 - f0
 	d += math.Sqrt(d*d - 8*f1*(f2+f0-2*f1))
 	return v1 - 2*f1*(v2-v0)/d
@@ -113,103 +117,56 @@ func linear(v0, f0, v1, f1 float64) float64 {
 func (c *BikeCalc) SingleLinear(power, len, vel float64) (float64, int) {
 	c.power = power
 	before := c.callsFunc
-	v0, f0, v1, f1 := c.Bracket(len, vel)
+	v0, f0, v1, f1 := c.bracket(len, vel)
 	if f0 > 0 || f1 < 0 {
 		return v1, 0
 	}
-	return linear(v0, f0, v1, f1) + len*len*0.015, c.callsFunc - before 
+	return linear(v0, f0, v1, f1) + len*len*0.014, c.callsFunc - before
 }
 
 //DoubleLinear --
 func (c *BikeCalc) DoubleLinear(power, len, vel float64) (float64, int) {
 	c.power = power
 	before := c.callsFunc
-	v0, f0, v1, f1 := c.Bracket(len, vel)
+	v0, f0, v1, f1 := c.bracket(len, vel)
 	if f0 > 0 || f1 < 0 {
 		return v1, 0
 	}
 	vel = linear(v0, f0, v1, f1)
 	len *= len * 0.04
 	vel += len * 0.5
-	vel = linear(c.Bracket(len, vel)) + len*len*0.02
-	return vel, c.callsFunc - before 
-}
-
-//ThreeLinear --
-func (c *BikeCalc) ThreeLinear(power, len, vel float64) (float64, int) {
-	c.power = power
-	before := c.callsFunc
-	v0, f0, v1, f1 := c.Bracket(len, vel)
-	if f0 > 0 || f1 < 0 {
-		return v1, 0
-	}
-	vel = linear(v0, f0, v1, f1)
-	len *= len * 0.04 
-	vel += len * 0.5
-	vel = linear(c.Bracket(len, vel))
-	len *= len * 0.04 
-	vel += len * 0.5
-	vel = linear(c.Bracket(len, vel)) + len*len*0.02
-	return vel, c.callsFunc - before 
+	vel = linear(c.bracket(len, vel)) + len*len*0.02
+	return vel, c.callsFunc - before
 }
 
 //SingleQuadratic --
 func (c *BikeCalc) SingleQuadratic(power, len, vel float64) (float64, int) {
 	c.power = power
 	before := c.callsFunc
-	v0, f0, v1, f1 := c.Bracket(len, vel)
-	if f0 > 0 || f1 < 0 {
-		return v1, 0
+	v0, f0, v2, f2 := c.bracket(len, vel)
+	if f0 > 0 || f2 < 0 {
+		return v2, 0
 	}
-	v := c.quadratic(v0, f0, v1, f1)
-	return v, c.callsFunc - before 
+	v1 := (v0 + v2) / 2
+	f1 := c.function(v1)
+	return c.quadratic(v0, f0, v1, f1, v2, f2), c.callsFunc - before
 }
 
-// SingleQuadraticTriple is faster SingleQuadratic, if vel is mostly guessed right.
-// Can challenge Newton-Raphson.
-// Propably still faster if function evaluations (3 or more) by SIMD/vector instructions.
-func (c *BikeCalc) SingleQuadraticTriple(power, len, vel float64) (float64, int) {
-	c.power = power
-	before := c.callsFunc
-	v0 := vel - 0.25*len
-	if v0 < len {
-		v0 = len
-	}
-	f0 := c.function(v0)
-	if f0 > 0 {
-		v0 -= len
-		f0 = c.function(v0)
-	}
-	v1, v2 := v0 + 0.5*len, v0 + len
-	f1, f2 := c.function(v1), c.function(v2)
-
-	if f0 <= 0 && 0 <= f2 {
-		d := f2 - f0
-		d  += math.Sqrt(d*d - 8*f1*(f2+f0-2*f1))
-		return v1 - 2*f1*len/d, c.callsFunc - before 
-	}
-	vel = v2 + len
-	if f0 > 0 {
-		vel = v0 - len
-	}
-	vel, i := c.SingleQuadratic(power, len, vel)
-	if i == 0 {
-		return vel, 0
-	}
-	return vel, c.callsFunc - before 
-}
-
-//DoubleQuadratic --
+// DoubleQuadratic --
 func (c *BikeCalc) DoubleQuadratic(power, len, vel float64) (float64, int) {
 	c.power = power
 	before := c.callsFunc
-	v0, f0, v1, f1 := c.Bracket(len, vel)
-	if f0 > 0 || f1 < 0 {
-		return v1, 0
-	}
-	vel = c.quadratic(v0, f0, v1, f1)
+	v0, f0, v2, f2 := c.bracket(len, vel)
+	v1 := (v0 + v2) / 2
+	f1 := c.function(v1)
+	vel = c.quadratic(v0, f0, v1, f1, v2, f2)
+
 	len *= len * len * 0.001
-	// vel on välissä (root-len, root+len) todennäköisyydellä >= 95%
-	vel = c.quadratic(c.Bracket(len, vel))
-	return vel, c.callsFunc - before 
+	// vel is in (root-len, root+len) with probability >= 95%
+	v0, f0, v2, f2 = c.bracket(len, vel)
+	v1 = (v0 + v2) / 2
+	f1 = c.function(v1)
+
+	vel = c.quadratic(v0, f0, v1, f1, v2, f2)
+	return vel, c.callsFunc - before
 }
