@@ -5,41 +5,53 @@ import "math"
 func (c *BikeCalc) Acceleration(v, power float64) float64 {
 	// 1. derivative of speed v with respect to time t: dv/dt = acceleration a = F/m.
 	// where m is mass and F is sum of resisting/assisting forces.
-
 	power /= v
 	v += c.wind
-	return (power - c.fGR - c.cDrag*v*math.Abs(v)) * c.oMassKin
+	return (power - c.fGR - c.cDrag*math.Abs(v)*v) * c.oMassKin
 }
 
-// At the end of this file are these two functions, DeltaTime and DeltaDist
-// implemented by 3 derivatives of speed, respect to time and distance.
-// Three derivatives are not enough for bigger delta time and distance and
-// using more derivatives is not practical. Also single derivative is not enough,
-// although mostly not worse than 3 derivatives, but estimating "average/middle"
-// acceleration below seems to work very well.
-
-func (c *BikeCalc) DeltaTime(Δtime, v, power float64) (Δvel, Δdist float64) {
-
-	Δvel = Δtime * c.Acceleration(v, power)
-	Δvel = Δtime * c.Acceleration(v+0.5*Δvel, power)
-	Δdist = Δtime * (v + 0.5*Δvel)
+func (c *BikeCalc) accelerationDerivatives(v, power float64) (dv_dt, da_dv, d2a_dv2 float64) {
+	ov := 1.0 / v
+	v += c.wind
+	cDrag := math.Copysign(c.cDrag, v)
+	power *= ov
+	dv_dt = c.oMassKin * (power - c.fGR - cDrag*v*v) // dv/dt = acceleration a = F/m
+	da_dv = c.oMassKin * (-power*ov - 2*cDrag*v)     // da/dv
+	d2a_dv2 = c.oMassKin * (power*ov*ov - cDrag) * 2 // d2a/dv2
 	return
 }
 
-func (c *BikeCalc) DeltaDist(Δdist, v, power float64) (Δvel, Δtime float64) {
-	// 1. derivative of speed v with respect to distance s:  dv/ds = a/v,
-	// where a is acceleration.
+func (c *BikeCalc) DeltaTime(Δtime, v0, power float64) (Δvel, Δdist float64) {
 
-	Δvel = Δdist * c.Acceleration(v, power) / v
-	w := v + 0.5*Δvel
-	Δvel = Δdist * c.Acceleration(w, power) / w
-	Δtime = Δdist / (v + 0.5*Δvel)
+	a, b1, b2 := c.accelerationDerivatives(v0, power)
+	// a1		= 	dv/dt = acceleration
+	// b1		= 	da/dv
+	// b2		= 	d2a/dv2
+	// a2		=  	da/dt	=	d2v/dt2
+	// a3 		=  	d2a/dt2	=	d3v/dt3
+	a2 := a * b1
+	a3 := a * (a*b2 + b1*b1)
+	Δvel = Δtime * (a + Δtime*(0.5*a2+(1.0/6)*Δtime*a3))
+	Δdist = Δtime * (v0 + 0.5*Δvel)
 	return
 }
 
-// DeltaVel laskee alkunopeudesta v0, teholla power matkan Δdist,
-// joka tarvitaan nopeuden muutokseen v0 -> v0 + Δvel.
-//
+func (c *BikeCalc) DeltaDist(Δdist, v0, power float64) (Δvel, Δtime float64) {
+	ov := 1.0 / v0
+	a, a1, a2 := c.accelerationDerivatives(v0, power)
+
+	// f is the 1. derivative of speed v with respect to distance x:  dv/dx = a/v
+	f := a * ov              //  dv/dx
+	b1 := (a1 - f) * ov      //  df/dv
+	b2 := (a2 - 2*b1) * ov   //  d2f/dv2
+	f2 := f * b1             //  df/dx	= d2v/dx2
+	f3 := f * (f*b2 + b1*b1) //  d2f/dx2	= d3v/dx3
+
+	Δvel = Δdist * (f + Δdist*(0.5*f2+(1.0/6)*Δdist*f3))
+	Δtime = Δdist / (v0 + 0.5*Δvel)
+	return
+}
+
 // Change in kinetic energy ΔKE = distance x force
 // fGR 		= gravity and rolling resistance force
 // fRider 	= -(power/v0 + power/v1) / 2
@@ -56,8 +68,8 @@ func (c *BikeCalc) DeltaVel(Δvel, v0, power float64) (Δdist, Δtime, fDrag, fS
 	v1 += c.wind
 	fDrag = c.cDrag * 0.5 * (v0*math.Abs(v0) + v1*math.Abs(v1))
 	fSum = c.fGR + fRider + fDrag
-	Δdist = ΔKE / fSum // forces near 0 must be checked in calling program
-	Δtime = -Δvel * c.massKin / fSum
+	Δdist = ΔKE / fSum 						// check fSum for 0 in calling program
+	Δtime = -Δvel * c.massKin / fSum		// fSUM = 0 => acceleration = 0
 	// Δtime = Δdist / (v0 + 0.5*Δvel) 		// same to 7 digits ride time
 	return
 }
@@ -117,70 +129,4 @@ func (c *BikeCalc) VelFromBrakeDist(dist float64) float64 {
 		return maxSpeed
 	}
 	return math.Sqrt(dist * fSum / d)
-}
-
-// These below are not used any more
-func (c *BikeCalc) accelerationDerivatives(v, power float64) (a, a1, a2 float64) {
-
-	ov := 1.0 / v
-	omk := 1.0 / c.massKin
-	v += c.wind
-	cDrag := c.cDrag
-	if v < 0 {
-		cDrag = -cDrag
-	}
-	power *= ov
-	a = omk * (power - c.fGR - cDrag*v*v) // dv/dt = acceleration a = F/m
-	a1 = omk * (-power*ov - 2*cDrag*v)    // da/dv
-	a2 = omk * (power*ov*ov - cDrag) * 2  // d2a/dv2
-	return
-}
-
-func (c *BikeCalc) DeltaDist3(Δdist, v0, power float64) (Δvel, Δtime float64) {
-	const n2 = 1.0 / 2
-	const n3 = n2 / 3
-	ov := 1.0 / v0
-
-	a, a1, a2 := c.accelerationDerivatives(v0, power)
-	// a	= 	dv/dt = acceleration
-	// a1	= 	da/dv
-	// a2	= 	d2a/dv2
-	// f1 on nopeuden v0 1. derivaatta matkan x suhteen: a/v (m/s/m)
-
-	f1 := a * ov               //  dv/dx
-	b1 := (a1 - f1) * ov       //  df/dv
-	b2 := (a2 - 2*b1) * ov     //  d2f/dv2
-	f2 := f1 * b1              //  df/dx	= d2v/dx2
-	f3 := f1 * (f1*b2 + b1*b1) //  d2f/dx2	= d3v/dx3
-	Δvel = Δdist * (f1 + Δdist*(f2*n2+Δdist*f3*n3))
-	Δtime = Δdist / (v0 + 0.5*Δvel)
-
-	// g on ajan t 1. derivaatta matkan x suhteen: 1/v (s/m)
-	// g := ov                   	//  dt/dx
-	// g1 := -ov * ov            	//  dg/dv
-	// g2 := -g1 * 2 * ov        	//  d2g/dv2
-	// gx1 := f1 * g1             	//  dg/dx	= d2t/dx2
-	// gx2 := f1 * (f1*g2 + b1*g1) 	//  d2g/dx2	= d3t/dx3
-	// Δtime = Δdist * (g + Δdist*(gx1*n2+Δdist*gx2*n3))
-	return
-}
-
-func (c *BikeCalc) DeltaTime3(Δtime, v0, power float64) (Δvel, Δdist float64) {
-	const (
-		n2 = 1.0 / 2
-		n3 = n2 / 3
-		n4 = n3 / 4
-	)
-	a1, b1, b2 := c.accelerationDerivatives(v0, power)
-	// a1		= 	dv/dt = acceleration
-	// b1		= 	da/dv
-	// b2		= 	d2a/dv2
-	// a2		=  	da/dt	=	d2v/dt2
-	// a3 		=  	d2a/dt2	=	d3v/dt3
-	a2 := a1 * b1
-	a3 := a1 * (a1*b2 + b1*b1)
-	Δvel = Δtime * (a1 + Δtime*(a2*n2+Δtime*a3*n3))
-	Δdist = Δtime * (v0 + 0.5*Δvel)
-	// Δdist = Δtime * (v0 + Δtime*(a1*n2+Δtime*(a2*n3+Δtime*a3*n4)))
-	return
 }
